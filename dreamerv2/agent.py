@@ -22,6 +22,21 @@ class Agent(common.Module):
           self.config, self.act_space, self.wm, self.tfstep,
           lambda seq: self.wm.heads['reward'](seq['feat']).mode())
 
+  def reset(self):
+    tf.py_function(lambda: self.tfstep.assign(
+      int(self.step), read_value=False), [], [])
+
+    self.wm.model_opt = common.Optimizer('model', **self.config.model_opt)
+    self._task_behavior.actor_opt = common.Optimizer('actor', **self.config.actor_opt)
+    self._task_behavior.critic_opt = common.Optimizer('critic', **self.config.critic_opt)
+    self._task_behavior.rewnorm.reset()
+    if self.config.slow_target:
+      self._task_behavior._updates = tf.Variable(0, tf.int64)
+    if self.config.expl_behavior != 'greedy':
+      self._expl_behavior = getattr(expl, self.config.expl_behavior)(
+        self.config, self.act_space, self.wm, self.tfstep,
+        lambda seq: self.wm.heads['reward'](seq['feat']).mode())
+
   @tf.function
   def policy(self, obs, state=None, mode='train'):
     obs = tf.nest.map_structure(tf.tensor, obs)

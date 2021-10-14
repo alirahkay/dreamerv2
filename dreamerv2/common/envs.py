@@ -7,6 +7,7 @@ import traceback
 import cloudpickle
 import gym
 import numpy as np
+from copy import copy
 
 
 class GymWrapper:
@@ -160,6 +161,123 @@ class DMC:
     obs.update({
         k: v for k, v in dict(time_step.observation).items()
         if k not in self._ignored_keys})
+    return obs
+
+class LOCADMC(DMC):
+  # Supports only locareacher task
+  def __init__(self, name, action_repeat=1, size=(64, 64), camera=None,
+               loca_phase="phase_1", loca_mode='train', one_way_wall_radius=0.1):
+    super().__init__(name, action_repeat, size, camera)
+    self._loca_phase = loca_phase
+    self._loca_mode = loca_mode
+
+    if self._loca_phase != "phase_1":
+      self._env._task.switch_loca_task()
+
+    self._actuators_length = np.array([
+      self._env._physics.named.model.body_pos['hand', 'x'],
+      self._env._physics.named.model.body_pos['finger', 'x']
+    ])
+    self._one_way_wall_radius = one_way_wall_radius
+
+  def get_target_1_pos(self):
+    return self._env._physics.named.data.geom_xpos['target_1', :2]
+
+  def get_finger_pos(self):
+    return self._env._physics.named.data.geom_xpos['finger', :2]
+
+  def check_inside_one_way_wall(self):
+    target_1_pos = self.get_target_1_pos()
+    finger_pos = self.get_finger_pos()
+    return np.linalg.norm(finger_pos - target_1_pos) <= self._one_way_wall_radius
+
+  def is_phase_2(self):
+    return self._loca_phase == "phase_2"
+
+  def step(self, action):
+    if (not self.is_phase_2()) or (self._loca_mode == 'eval'):
+      return super().step(action)
+
+    assert np.isfinite(action['action']).all(), action['action']
+    reward = 0.0
+    for _ in range(self._action_repeat):
+      physics_data_copy = copy(self._env._physics.data)
+      time_step = self._env.step(action['action'])
+      if not self.check_inside_one_way_wall():
+        self._env._physics._reload_from_data(physics_data_copy)
+        time_step = self._env.step(0.)
+      reward += time_step.reward or 0.0
+      if time_step.last():
+        break
+    assert time_step.discount in (0, 1)
+    obs = {
+      'reward': reward,
+      'is_first': False,
+      'is_last': time_step.last(),
+      'is_terminal': time_step.discount == 0,
+      'image': self._env.physics.render(*self._size, camera_id=self._camera),
+    }
+    obs.update({
+      k: v for k, v in dict(time_step.observation).items()
+      if k not in self._ignored_keys})
+    return obs
+
+  def sample_in_one_way_wall(self):
+    def sample_xy():
+      x = np.random.uniform(low=0, high=self._one_way_wall_radius)
+      y = np.sqrt(np.random.uniform(low=0, high=(self._one_way_wall_radius**2 - x**2)))
+      return np.array([x, y])
+
+    def inverse_kinematics(pos):
+      x, y = pos[0], pos[1]
+      a1, a2 = self._actuators_length[0], self._actuators_length[1]
+      d = (x ** 2 + y ** 2 - a1 ** 2 - a2 ** 2) / (2 * a1 * a2)
+      theta2 = np.arccos(d)
+      theta1 = np.arctan(y / x) - np.arctan((a2 * np.sin(theta2)) / (a1 + a2 * np.cos(theta2)))
+      # theta2_ = -np.arccos(d)
+      # theta1_ = np.arctan(y / x) - np.arctan((a2 * np.sin(theta2_)) / (a1 + a2 * np.cos(theta2_)))
+      return theta1, theta2
+
+    def forward_kinematics(theta1, theta2):
+      a1, a2 = self._actuators_length[0], self._actuators_length[1]
+      x = a1 * np.cos(theta1) + a2 * np.cos(theta1 + theta2)
+      y = a1 * np.sin(theta1) + a2 * np.sin(theta1 + theta2)
+      return np.array([x, y])
+
+    target_1_pos = self.get_target_1_pos()
+    while True:
+      final_finger_pos = sample_xy() + target_1_pos
+      if np.linalg.norm(final_finger_pos) > self._actuators_length.sum():
+        continue
+      if final_finger_pos[0] == 0.:
+        continue
+      theta1, theta2 = inverse_kinematics(final_finger_pos)
+      if np.isnan(theta1) or np.isnan(theta2):
+        continue
+      tmp_finger_pos = forward_kinematics(theta1, theta2)
+      if np.linalg.norm(final_finger_pos - tmp_finger_pos) > 1e-5:
+        theta1 += np.pi
+      break
+    return theta1, theta2
+
+  def reset(self):
+    if (not self.is_phase_2()) or (self._loca_mode == 'eval'):
+      return super().reset()
+    time_step = self._env.reset()
+    theta1, theta2 = self.sample_in_one_way_wall()
+    with self._env._physics.reset_context():
+      self._env._physics.named.data.qpos['shoulder'] = theta1
+      self._env._physics.named.data.qpos['wrist'] = theta2
+    obs = {
+      'reward': 0.0,
+      'is_first': True,
+      'is_last': False,
+      'is_terminal': False,
+      'image': self._env.physics.render(*self._size, camera_id=self._camera),
+    }
+    obs.update({
+      k: v for k, v in dict(time_step.observation).items()
+      if k not in self._ignored_keys})
     return obs
 
 

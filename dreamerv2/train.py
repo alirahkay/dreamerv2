@@ -37,7 +37,11 @@ def main():
     config = config.update(configs[name])
   config = common.Flags(config).parse(remaining)
 
-  logdir = pathlib.Path(config.logdir).expanduser()
+  if config.task.split('_', 1)[0] == 'locadmc':
+    general_logdir = pathlib.Path(config.logdir).expanduser()
+    logdir = pathlib.Path(config.logdir / config.loca_phase).expanduser()
+  else:
+    logdir = pathlib.Path(config.logdir).expanduser()
   logdir.mkdir(parents=True, exist_ok=True)
   config.save(logdir / 'config.yaml')
   print(config, '\n')
@@ -76,7 +80,11 @@ def main():
 
   def make_env(mode):
     suite, task = config.task.split('_', 1)
-    if suite == 'dmc':
+    if suite == 'locadmc':
+      env = common.DMC(
+        task, config.action_repeat, config.render_size, config.dmc_camera, config.loca_phase, mode
+      )
+    elif suite == 'dmc':
       env = common.DMC(
           task, config.action_repeat, config.render_size, config.dmc_camera)
       env = common.NormalizeAction(env)
@@ -156,6 +164,19 @@ def main():
   train_agent(next(train_dataset))
   if (logdir / 'variables.pkl').exists():
     agnt.load(logdir / 'variables.pkl')
+  elif config.task.split('_', 1)[0] == 'locadmc':
+    loca_phases = {
+      'phase_2': 'phase_1',
+      'phase_3': 'phase_2'
+    }
+    if loca_phases.get(config.loca_phase) and (general_logdir / f'{loca_phases[config.loca_phase]}/variables.pkl').exists():
+      print(f'Load agent pretrained on loca {loca_phases[config.loca_phase]}')
+      agnt.load(general_logdir / f'{loca_phases[config.loca_phase]}/variables.pkl')
+      agnt.reset()
+    else:
+      print(f'Pretrain agent on loca {config.loca_phase}.')
+      for _ in range(config.pretrain):
+        train_agent(next(train_dataset))
   else:
     print('Pretrain agent.')
     for _ in range(config.pretrain):
