@@ -166,7 +166,7 @@ class DMC:
 class LOCADMC(DMC):
   # Supports only locareacher task
   def __init__(self, name, action_repeat=1, size=(64, 64), camera=None,
-               loca_phase="phase_1", loca_mode='train', one_way_wall_radius=0.1):
+               loca_phase="phase_1", loca_mode='train', one_way_wall_radius=0.2):
     super().__init__(name, action_repeat, size, camera)
     self._loca_phase = loca_phase
     self._loca_mode = loca_mode
@@ -205,7 +205,7 @@ class LOCADMC(DMC):
       time_step = self._env.step(action['action'])
       if not self.check_inside_one_way_wall():
         self._env._physics._reload_from_data(physics_data_copy)
-        time_step = self._env.step(0.)
+        # time_step = self._env.step(0.)
       reward += time_step.reward or 0.0
       if time_step.last():
         break

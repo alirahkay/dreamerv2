@@ -39,7 +39,7 @@ def main():
 
   if config.task.split('_', 1)[0] == 'locadmc':
     general_logdir = pathlib.Path(config.logdir).expanduser()
-    logdir = pathlib.Path(config.logdir / config.loca_phase).expanduser()
+    logdir = pathlib.Path(config.logdir + f'/{config.loca_phase}').expanduser()
   else:
     logdir = pathlib.Path(config.logdir).expanduser()
   logdir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ def main():
   def make_env(mode):
     suite, task = config.task.split('_', 1)
     if suite == 'locadmc':
-      env = common.DMC(
+      env = common.LOCADMC(
         task, config.action_repeat, config.render_size, config.dmc_camera, config.loca_phase, mode
       )
     elif suite == 'dmc':

@@ -23,6 +23,7 @@ class Agent(common.Module):
           lambda seq: self.wm.heads['reward'](seq['feat']).mode())
 
   def reset(self):
+    tf.config.run_functions_eagerly(True)
     tf.py_function(lambda: self.tfstep.assign(
       int(self.step), read_value=False), [], [])
 
